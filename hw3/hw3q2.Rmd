@@ -1,0 +1,263 @@
+---
+title: "HW3 Q2 - b03705027 鄭從德"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+## (1)
+```{r}
+load(file="msong_slhw.rdata")
+#defin the summary statistic function
+sumds = function(ds) {
+  nvariable = ncol(ds)
+  varnames = colnames(ds)
+  for(i in 1:nvariable) {
+    tmp1 = ds[,i]
+    #remove NA
+    tmp1 = tmp1[!is.na(tmp1)]
+    n = length(tmp1)
+    mean = mean(tmp1)
+    median = median(tmp1)
+    sd = sd(tmp1)
+    q13 = quantile(tmp1, c(0.25, 0.75))
+    min1 = min(tmp1)
+    max1 = max(tmp1)
+    arow = c(n, mean, median, sd, q13, min1, max1)
+    if(i==1) {
+      out1 = arow
+    } else {
+      out1 = rbind(out1, arow)
+    }
+  }
+  rownames(out1) = varnames
+  colnames(out1) = c("n", "mean", "median", "sd", "Q1", "Q3", "Min", "Max")
+  return(out1)
+}
+#sumds(msong_train)
+```
+
+### Summary Statistics of `msong_test`
+```{r}
+#sumds(msong_test)
+```
+
+## Problem (2): Standardize data and Ridge Regression
+### Data Preprocess
+```{r}
+msong_train_new = head(msong_train, 5000)
+# scaled.msong_train = scale(x=msong_train_new)
+
+# Save mean and sd from msong_train
+scaled.msong_test = msong_test
+nvariable = ncol(msong_train_new)
+
+# standardize features of msong_test(saved as sacled.msong_test)
+for(i in 1:nvariable) {
+  colm = msong_train_new[,i]
+  m = mean(colm)
+  s = sd(colm)
+  if(i==1){
+    # Don't scale y
+    scaled.msong_test[,i] = (scaled.msong_test[,i]-m)
+  }
+  else{
+    scaled.msong_test[,i] = ((scaled.msong_test[,i]-m) / s)
+  }
+}
+scaled.msong_test = na.omit(scaled.msong_test)
+
+```
+#### Training Part
+```{r}
+x_train = msong_train_new[,-1]
+x_train = scale(x_train)
+y_train = msong_train_new[,1]
+y_train = scale(y_train, scale=FALSE)
+
+x_test = scaled.msong_test[,-1]
+y_test = scaled.msong_test[,1]
+
+train_and_test = function(x_train, y_train, x_test, y_test, lambda){
+  M = ncol(x_train)
+  I = diag(M)
+  w = solve((t(x_train)%*%x_train)+lambda*I) %*% t(x_train) %*% y_train
+  # Predict y_train
+  pred = x_train%*%w
+  training_error = RMSE(pred, y_train)
+  # Predict y_test
+  pred = as.matrix(x_test)%*%w
+  testing_error = RMSE(pred, y_test)
+  
+  return(list(training_error=training_error, testing_error=testing_error))
+}
+
+#result = train_and_test(x_train,y_train,x_test,y_test,lambda=5)
+
+RMSE = function(pred, ans){
+  return(sqrt(mean((pred - ans)^2)))
+}
+
+lambda_list = c(1,10,100,1000,10000)
+training_error_list = c()
+testing_error_list = c()
+for(l in lambda_list){
+  result = train_and_test(x_train,y_train,x_test,y_test,lambda=l)
+  training_error_list = append(training_error_list, result$training_error)
+  testing_error_list = append(testing_error_list, result$testing_error)
+}
+
+```
+### Plot function
+```{r}
+myPlot = function(training_error, testing_error, title, xLabel, xLabel_array, ylim){
+  plot(y=training_error, x=xLabel_array ,type = "o",col = "red", xlab = xLabel, ylab = "RMSE", 
+       main = title, ylim=ylim)
+  lines(y=testing_error,x=xLabel_array, type = "o", col = "blue")
+}
+
+myPlot(training_error_list,testing_error_list,'Trainging Error vs Testing Error','log(Lambda)',
+       log10(lambda_list),c(9.3,10.4))
+
+
+```
+<br>
+### Insights
+
+可以看出來，在標準化過的資料上，當我取lambda = 100時會得到最低的Testing Error。這個時候Training Error不是最低，表示我們有效的避免了Overfit的情況。後面更大個Lambda造成RMSE爆升，是因為對這樣的X矩陣而言lambda數值已經太高，不再只是調和用的調整參數，而是已經dominate全部的結果。
+
+## Problem (3)
+```{r}
+# Get new training data of first 500 and 1000 row
+msong_train_500 = head(msong_train, 500)
+x_train_500 = scale(msong_train_500[,-1])
+y_train_500 = scale(msong_train_500[,1], scale = FALSE)
+
+msong_train_1000 = head(msong_train, 1000)
+x_train_1000 = scale(msong_train_1000[,-1])
+y_train_1000 = scale(msong_train_1000[,1], scale = FALSE)
+
+lambda_list = c(1,10,100,1000,10000,100000)
+testing_error_list = c()
+testing_error_list_500 = c()
+testing_error_list_1000 = c()
+for(l in lambda_list){
+  result_5000 = train_and_test(x_train, y_train, x_test, y_test, lambda = l)
+  result_1000 = train_and_test(x_train_1000,y_train_1000,x_test,y_test,lambda=l)
+  result_500 = train_and_test(x_train_500,y_train_500,x_test,y_test,lambda=l)
+  testing_error_list = append(testing_error_list,result_5000$testing_error)
+  testing_error_list_1000 = append(testing_error_list_1000, result_1000$testing_error)
+  testing_error_list_500 = append(testing_error_list_500, result_500$testing_error)
+}
+```
+
+### Visualization
+```{r}
+plot(y=testing_error_list, x=log10(lambda_list) ,type = "o",col = "red", xlab = 'Log(Lambda)', ylab = "RMSE", main = 'Sample Size vs Testing Error(RMSE)', ylim=c(9,11))
+lines(y=testing_error_list_1000,x=log10(lambda_list), type = "o", col = "blue")
+lines(y=testing_error_list_500,x=log10(lambda_list), type = "o", col = "green")
+legend(2, 11, legend=c("n=5000", "n=1000", 'n=500'), col=c("red", "blue", "green"),lty=1:1, cex=1)
+```
+<br>
+### Insights:
+
+這一題的結果滿漂亮的，可以發現當Lambda 取100~1000之間時，在不同資料量的資料及都有效的製造了testing error的最低點，表示未來如果有同樣的Dataset，可以很有自信的選擇lambda。其中我們也可以看到，資料量越大，Error越低，而且低滿多的，告訴我們更多資料及能提供更好的預測模型。另外、在資料量較少時，lambda的選擇有較大的影響，也可以明顯看到一個U型的曲線。
+
+
+## Problem (4)
+```{r}
+msong_train_1000 = head(msong_train, 1000)
+x_train_u1000 = as.matrix(msong_train_1000[,-1])
+y_train_1000 = scale(msong_train_1000[,1], scale = FALSE)
+
+x_test_u = msong_test[,-1]
+y_test_u = y_test # year - mean(y_train)
+
+# training and recording results
+lambda_list = c(1,10,100,1000,10000,100000,1000000,10000000)
+scaled_testing_error = c()
+scaled_training_error = c()
+unscaled_testing_error = c()
+unscaled_training_error = c()
+for(l in lambda_list){
+  result_scaled = train_and_test(x_train_1000,  y_train_1000, x_test, y_test, lambda=l)
+  result_unscaled = train_and_test(x_train_u1000, y_train_1000, x_test_u, y_test_u, lambda=l)
+  
+  scaled_testing_error = append(scaled_testing_error,result_scaled$testing_error)
+  scaled_training_error = append(scaled_training_error, result_scaled$training_error)
+  unscaled_testing_error = append(unscaled_testing_error,result_unscaled$testing_error)
+  unscaled_training_error = append(unscaled_training_error, result_unscaled$training_error)
+}
+```
+### Visualization
+```{r}
+plot(y=scaled_testing_error, x=log10(lambda_list) ,type = "o",col = "red", xlab = 'Log(Lambda)', ylab = "RMSE", main = 'Scaled vs Unscaled data', ylim=c(8.8,13))
+lines(y=scaled_training_error,x=log10(lambda_list), type = "b", col = "red", lty=2)
+
+lines(y=unscaled_testing_error,x=log10(lambda_list), type = "o", col = "blue")
+lines(y=unscaled_training_error,x=log10(lambda_list), type = "b", col = "blue",lty=2)
+legend(0, 13, legend=c("Scaled(Testing Error)", "Scaled(Training Error)", 'Unscaled(Testing Error)','Unscaled(Training Error)'), col=c("red","red", "blue", "blue"),lty=1:2, cex=1)
+```
+<br>
+### Insights
+
+這一題由於y都是經過標準化的，我們可以透過testing error來比較何者的預測果較佳。從圖中可以看出，有將features標準化過的(紅線)，在 `lambda = 10^2 `時有最好的預測效果，而且Testing Error 低於沒有標準化過(藍線)的最低點，代表有經過標準化能夠提供叫精準的預測。至於沒有經過標準化的Feature set，則是在Lambda = 10^7時有較低的Testing Error，這是因為沒有標準差的X相乘之後會得到一個數值非常大的矩陣，因此加上`lambda*I`的這個調整值也必須較大，才能造成影響，前面lambda < 10000對於數值這麼大的矩陣而言幾乎是沒有作用的。
+我們可以推論，經過標準化的feature能帶來較好的結果，也可以很好的控制選擇lambda的範圍。
+
+## Problem(5) 
+```{r}
+msong_train_1000 = head(msong_train, 1000)
+x_train_u1000 = as.matrix(msong_train_1000[,-1])
+y_train_u1000 = as.matrix(msong_train_1000[,1])
+
+x_test_u = as.matrix(msong_test[,-1])
+y_test_u = as.matrix(msong_test[,1])
+
+lambda_list = c(1,10,100,1000,10000,100000,1000000)
+total_mess_training_error = c()
+total_mess_testing_error = c()
+addition_testing = c()
+addition_training= c()
+for(l in lambda_list){
+  result_new = train_and_test(x_train_u1000,  y_train_u1000, x_test_u, y_test_u, lambda=l)
+  result_addition = train_and_test(x_train_1000, y_train_u1000, x_test, y_test_u, lambda = l)
+  
+  total_mess_training_error = append(total_mess_training_error, result_new$training_error)
+  total_mess_testing_error = append(total_mess_testing_error, result_new$testing_error)
+  addition_testing = append(addition_testing, result_addition$testing_error)
+  addition_training = append(addition_training, result_addition$training_error)
+}
+# Two arrays from previous section
+# scaled_testing_error
+# unscaled_testing_error
+```
+### Visualization
+```{r}
+plot(y=scaled_testing_error[1:length(lambda_list)], x=log10(lambda_list) ,type = "o",col = "red", xlab = 'Log(Lambda)', ylab = "RMSE", main = 'Ultimate Comparison', ylim=c(8.8,250))
+lines(y=unscaled_testing_error[1:length(lambda_list)],x=log10(lambda_list), type = "b", col = "green", lty=2)
+lines(y=total_mess_testing_error,x=log10(lambda_list), type = "o", col = "blue")
+lines(y=total_mess_training_error,x=log10(lambda_list), type = "b", col = "blue",lty=2)
+legend(0, 250, legend=c("Scaled(Testing Error)", "Scaled Features Only(Testing Error)", 'Unscaled(Testing Error)','Unscaled(Training Error)'), col=c("red","green", "blue", "blue"),lty=1:2, cex=1)
+
+```
+<br>
+### Insights
+
+這一題中我們可以看到，X跟y都沒有經過標準化的藍線，RMSE明顯較大。但我們不能直接比較此題的RMSE以及前面兩題的RMSE，因為這兩組的y並不相同，所以直接比較RMSE是沒有意義的，我們只能觀察出，在沒有經過標準化的這個資料集中，Lambda幾乎沒有幫助，只有在lambda太大時讓Model爛掉而已。
+
+為了要觀察沒有變動Y時的模型特性，我多做了以下的實驗：我做了不變動Y，但是將它的Features X全部標準化的實驗：
+
+
+### Additional Comparison
+```{r}
+plot(y=addition_testing, x=log10(lambda_list) ,type = "o",col = "red", xlab = 'Log(Lambda)', ylab = "RMSE", main = 'Additional Comparison', ylim=c(100,2200))
+lines(y=addition_training,x=log10(lambda_list), type = "o", col = "red",lty=2)
+
+lines(y=total_mess_testing_error,x=log10(lambda_list), type = "o", col = "blue")
+lines(y=total_mess_training_error,x=log10(lambda_list), type = "b", col = "blue",lty=2)
+
+legend(0, 1600, legend=c("Scaled X (Testing Error)", "Scaled X (Training Error)","Original X (Training Error)", "Original X (Testing Error)"), col=c("red","red","blue","blue"),lty=1:2, cex=1)
+```
+<br>
+結果可以發現RMSE爆高，這告訴我們在如果我們讓Y維持沒有平移過，但是對X進行標準化，只會造成很小的x數值，無法表達未標準化的Y之間的微小差距。
+整體而言，不對y進行平移&標準化的話，由於y都非常接近，會讓預測難度提昇許多。
