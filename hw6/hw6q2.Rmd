@@ -1,0 +1,233 @@
+---
+title: "b03705027 鄭從德 hw6 Part b"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+
+```{r}
+load('50kpred.rdata')
+library('e1071')
+library('dummies')
+library('glmnet')
+library('randomForest')
+```
+## My Functions
+``` {r}
+replace_with_dummy = function(df, cols){
+  dummydf = dummy(cols)
+  df = cbind(df, dummydf)
+  return(df)
+}
+
+get_error_rate = function(predictions, y){
+  tf_array = predictions>0.5
+  t=0
+  f=0
+  for(i in 1:length(tf_array)){
+    if( (tf_array[i]&&y[i]) || (tf_array[i]==FALSE && y[i]==FALSE )){
+      t = t+1
+    }else{
+      f = f+1
+    }
+  }
+  return(f/(t+f))
+}
+
+```
+
+
+## Problem 1 
+```{r}
+df_x_train_all = raw1[,1:14]
+df_y_train_all = raw1[,16]
+
+counter = c()
+pro = c()
+for(i in 1:10){
+  counter[i] = 0
+  pro[i]=0
+}
+for(i in 1:nrow(df_x_train_all)){
+  classico = floor(df_x_train_all$age[i]/10)
+  if(df_y_train_all[i]==TRUE){
+    pro[classico] = (pro[classico]*counter[classico] + 1)/(counter[classico]+1)
+  }
+  else{
+    pro[classico] = (pro[classico]*counter[classico])/(counter[classico]+1)
+  }
+  counter[classico] = counter[classico] + 1
+}
+
+print(pro)
+plot(y=pro, x=c(1,2,3,4,5,6,7,8,9,10) ,type = "o",col = "red", xlab = 'AGE/10', ylab = "Prob of Earning 50K+", 
+       main = 'AGE to Prob')
+```
+In this question, I chose 'AGE' as the key variable. We can see from the line chart that nearly 40% people around 40~60 year-old make more than 50K a year. This totally makes sense since most people reach the peak of their careers around this age. There's another peak at 90+ year-old, I think these datapoints are from extremely rich people that receive better medical care or just have a better life after retire so they tend to live longer.
+
+
+## Problem 2: Ridge Regression
+
+### Part 1 Preprocessing
+```{r}
+# Normalize Data and create dummies
+# COMBINE ALL
+df_x_train = raw1[,1:14]
+df_y_train = raw1[,16]
+df_x_test = raw_test[,1:14]
+df_y_test = raw_test[,16]
+df_x = rbind(df_x_train, df_x_test)
+
+df_x$age = scale(df_x$age)
+df_x$fnlwgt = scale(df_x$fnlwgt)
+df_x$education_num = scale(df_x$education_num)
+df_x$capital_gain = scale(df_x$capital_gain)
+df_x$capital_loss = scale(df_x$capital_loss)
+df_x$hours_per_week = scale(df_x$hours_per_week)
+
+## Replace with dummy
+df_x = replace_with_dummy(df_x, df_x$sex)
+df_x = replace_with_dummy(df_x, df_x$workclass)
+df_x = replace_with_dummy(df_x, df_x$marital_status)
+df_x = replace_with_dummy(df_x, df_x$occupation)
+df_x = replace_with_dummy(df_x, df_x$relationship)
+df_x = replace_with_dummy(df_x, df_x$race)
+df_x = replace_with_dummy(df_x, df_x$native_country)
+
+
+# Get rid of original columns
+df_x <- subset(df_x, select = -sex)
+df_x <- subset(df_x, select = -workclass)
+df_x <- subset(df_x, select = -education)
+df_x <- subset(df_x, select = -marital_status)
+df_x <- subset(df_x, select = -occupation)
+df_x <- subset(df_x, select = -relationship)
+df_x <- subset(df_x, select = -race)
+df_x <- subset(df_x, select = -native_country)
+
+cSumsdf = colSums(df_x)
+
+for(col in colnames(df_x)){
+  if(cSumsdf[col]<50){
+    if(grepl('df_x', col)){
+      df_x = df_x[, names(df_x)!= col]
+    }
+  }  
+}
+
+df_x_train = df_x[1:30162,]
+df_x_test = df_x[30163:45222,]
+
+## Define Subtraining and Tunning Set
+x_tunning = df_x_train[folds==10,]
+x_subtraining = df_x_train[folds!=10,]
+y_tunning = df_y_train[folds==10]
+y_subtraining = df_y_train[folds!=10]
+
+```
+
+## Ridge Regression
+```{r}
+fit = cv.glmnet(x=as.matrix(x_subtraining), y=y_subtraining, family="binomial")
+opt_lambda <- fit$lambda.min
+rrfit <- fit$glmnet.fit
+summary(rrfit)
+rrprediction <- predict(rrfit, s = opt_lambda, newx = as.matrix(df_x_test), type='response')
+rr_testing_for_stacking = rrprediction>0.5
+e = get_error_rate(rrprediction, df_y_test)
+print(e)
+
+```
+The Testing Error Rate on Ridge Regression is 15.12%
+
+
+## Problem 3. Random Forest
+```{r}
+rm = randomForest(x=as.matrix(x_subtraining), y=as.matrix(y_subtraining), xtest=as.matrix(df_x_test), ytest=as.matrix(df_y_test), keep.forest=TRUE)
+rf_testing_for_stacking = rm$test$predicted>0.5
+e2 = get_error_rate(rm$test$predicted, df_y_test)
+print('Testing Error Rate:')
+print(e2)
+```
+The Testing Error Rate on Random Forest is 14.34%
+
+
+## Problem 4.  SVM
+```{r}
+svmModel = svm(x=as.matrix(x_subtraining), y=as.vector(y_subtraining), type='one-classification')
+svmPredictions = predict(svmModel, as.matrix(df_x_test))
+t=0
+f=0
+for(i in 1:length(svmPredictions)){
+  if((svmPredictions[i] && df_y_test[i]) || (svmPredictions==FALSE && df_y_test[i]==FALSE)){
+      t=t+1
+  }else{
+    f=f+1
+  }
+}
+print('Testing Error Rate:')
+print((f/(f+t)))
+```
+The Testing Error Rate on SVM is 11.82%
+
+## Problem 5. Stacking
+```{r}
+model_rr_pred_v = predict(rrfit, s = opt_lambda, newx = as.matrix(x_tunning), type='response')
+model_rr_pred_b = model_rr_pred_v>0.5
+model_rf_pred_v = predict(rm, as.matrix(x_tunning))
+model_rf_pred_b = model_rf_pred_v > 0.5
+model_svm_pred_b = predict(svmModel, as.matrix(x_tunning), probability=TRUE)
+model_svm_pred_v = as.integer(model_svm_pred_b)
+# My training X:
+stacking_x = data.frame('ridge'=model_rr_pred_b, "randomForest"=model_rf_pred_b, "svm"=model_svm_pred_b)
+# Testing X for stacking
+stacking_x_test = data.frame('ridge'=rr_testing_for_stacking, "randomForest"=rf_testing_for_stacking, "svm"=svmPredictions)
+```
+
+### Model(A) Ridge Regression:
+```{r}
+rrfit_2 = cv.glmnet(x=as.matrix(stacking_x), y=y_tunning, family="binomial")
+opt_lambda_2 <- rrfit_2$lambda.min
+rrfit_2 <- rrfit_2$glmnet.fit
+modela_pred <- predict(rrfit_2, s = opt_lambda, newx = as.matrix(stacking_x_test), type='response')
+ea = get_error_rate(modela_pred, df_y_test)
+print(ea)
+```
+Testing Error is 14.34%
+
+
+### Model(B) Logistic Regression:
+```{r}
+y_tunning_df = data.frame('y'=y_tunning)
+mydata = cbind(y_tunning, stacking_x)
+fit <- glm(y_tunning~X1+randomForest+svm,data=mydata,family=binomial())
+summary(fit)
+modelb_pred = predict(fit, newdata = stacking_x_test)
+eb = get_error_rate(modelb_pred, df_y_test)
+print(eb)
+```
+Testing Error of Logistic Regression is 14.42%
+
+### Model(C)  Simple Average
+```{r}
+sa_pred = rrprediction + rm$test$predicted + svmPredictions > 1.5
+get_error_rate(sa_pred, df_y_test)
+```
+Testing Error of Simple Average: 17.96%
+
+### Model(D) VOTE!
+```{r}
+voting = as.integer(rr_testing_for_stacking) + as.integer(rf_testing_for_stacking ) + as.integer(svmPredictions)
+voting = voting>1.5
+ed = get_error_rate(voting, df_y_test)
+print(ed)
+```
+Testing Error of Voting Method : 14.78%
+
+### Conclusion:
+Among All stacking methods, Ridge Regression gave a better result. I think it's explainable because the `voting method` gives all the three models the same weight, on the other hand, adding regression in stacking procedure means a small training process that should yield better results. 
+
+In this question, all the three original models performs pretty good, but one of the model perform much better than the other two (89% to 85% accuracy).Stacking the three models could potentially bring bias to the SVM model, which cause the higher error rate. The stacking method should have a better performance when the three models yields similar result.
+
+Also, in this question, the tunning set is relatively small, so only using the tunning set to find the stacking regression parameters may not be a good idea compares to considering all the training set.
